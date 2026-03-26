@@ -4,10 +4,10 @@ package com.aditya.order_service.event.producer;
 
 import com.aditya.contracts.order.OrderCreatedEvent;
 import com.aditya.order_service.config.RabbitMQConfig;
-import com.aditya.order_service.event.util.EventRoutingKeyResolver;
+
 import com.aditya.order_service.outbox.model.OutboxEvent;
 import com.aditya.order_service.outbox.model.OutboxStatus;
-import com.aditya.order_service.repository.OutboxEventRepository;
+import com.aditya.order_service.outbox.repository.OutboxEventRepository;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,7 +26,7 @@ public class OutboxPublisher {
 
     private final OutboxEventRepository repository;
     private final RabbitTemplate rabbitTemplate;
-    private final EventRoutingKeyResolver routingKeyResolver;
+
     private final ObjectMapper objectMapper;
     @Scheduled(fixedDelay = 5000)
     public void publishEvents() {

@@ -25,6 +25,9 @@ public class Order {
     @Id
     private UUID id;
 
+    @Column(name = "idempotency_key", unique = true, nullable = false)
+    private String idempotencyKey;
+
      @Column(name= "payment_id")
      private UUID paymentID;
 

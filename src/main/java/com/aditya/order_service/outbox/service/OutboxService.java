@@ -1,11 +1,11 @@
-package com.aditya.order_service.service;
+package com.aditya.order_service.outbox.service;
 
 
 import com.aditya.contracts.event.DomainEvent;
 
 import com.aditya.order_service.outbox.model.OutboxEvent;
 import com.aditya.order_service.outbox.model.OutboxStatus;
-import com.aditya.order_service.repository.OutboxEventRepository;
+import com.aditya.order_service.outbox.repository.OutboxEventRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;

@@ -1,4 +1,4 @@
-package com.aditya.order_service.repository;
+package com.aditya.order_service.outbox.repository;
 
 import com.aditya.order_service.outbox.model.OutboxEvent;
 import com.aditya.order_service.outbox.model.OutboxStatus;

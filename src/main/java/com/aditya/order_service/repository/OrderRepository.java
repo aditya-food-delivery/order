@@ -39,4 +39,6 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     WHERE o.id = :orderId
 """)
     Optional<OrderStatusResponse> findOrderStatus(UUID orderId);
+
+    Optional<Order> findByIdempotencyKey(String key);
 }

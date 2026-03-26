@@ -13,6 +13,7 @@ import java.util.UUID;
 public class CreateOrderRequest {
 
     private UUID userId;
+    private String idempotencyKey;
     private List<OrderItemRequest> items;
 
     @Data

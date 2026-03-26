@@ -12,14 +12,16 @@ import com.aditya.order_service.domain.enums.PaymentStatus;
 import com.aditya.order_service.domain.model.Order;
 import com.aditya.order_service.domain.model.OrderItem;
 import com.aditya.order_service.event.OrderEventFactory;
+import com.aditya.order_service.outbox.service.OutboxService;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 
 
 import com.aditya.order_service.repository.OrderRepository;
 
-import com.aditya.order_service.repository.OutboxEventRepository;
+import com.aditya.order_service.outbox.repository.OutboxEventRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -41,14 +43,29 @@ public class OrderService {
     @Transactional
     public OrderResponse createOrder(CreateOrderRequest request) {
 
-        // 🧠 1. Calculate total
+        // ✅ 0. Validate idempotency key
+        if (request.getIdempotencyKey() == null || request.getIdempotencyKey().isBlank()) {
+            throw new IllegalArgumentException("Idempotency key is required");
+        }
+
+        // ✅ 1. Check if order already exists (Idempotency)
+        Order existing = orderRepository
+                .findByIdempotencyKey(request.getIdempotencyKey())
+                .orElse(null);
+
+        if (existing != null) {
+            return mapToResponse(existing);
+        }
+
+        // 🧠 2. Calculate total
         BigDecimal total = request.getItems().stream()
                 .map(item -> item.getPrice().multiply(BigDecimal.valueOf(item.getQuantity())))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        // 🧱 2. Build Order
+        // 🧱 3. Build Order
         Order order = Order.builder()
                 .id(UUID.randomUUID())
+                .idempotencyKey(request.getIdempotencyKey()) // 🔥 IMPORTANT
                 .userId(request.getUserId())
                 .totalAmount(total)
                 .status(OrderStatus.CREATED)
@@ -56,45 +73,60 @@ public class OrderService {
                 .createdAt(Instant.now())
                 .build();
 
-        // 🧱 3. Build Order Items
+        // 🧱 4. Build Order Items
         List<OrderItem> items = request.getItems().stream()
                 .map(reqItem -> OrderItem.builder()
                         .id(UUID.randomUUID())
                         .menuItemId(reqItem.getMenuItemId())
                         .quantity(reqItem.getQuantity())
-                        .price(reqItem.getPrice())
+                        .price(reqItem.getPrice()) // ✅ price snapshot
                         .order(order)
                         .build()
-                ).collect(Collectors.toList());
+                ).toList();
 
         order.setItems(items);
-        //save order
-         Order saved = orderRepository.save(order);
 
-        OrderCreatedEvent payload = OrderCreatedEvent.builder()
-                 .orderId(saved.getId())
-                .userId(saved.getUserId())
-                .totalAmount(saved.getTotalAmount()).build();
+        try {
+            // 💾 5. Save order
+            Order saved = orderRepository.save(order);
 
+            // 📦 6. Create event
+            OrderCreatedEvent payload = OrderCreatedEvent.builder()
+                    .orderId(saved.getId())
+                    .userId(saved.getUserId())
+                    .totalAmount(saved.getTotalAmount())
+                    .build();
 
-        DomainEvent<?> event =
-                orderEventFactory.createOrderCreatedEvent(saved.getId(),payload);
+            DomainEvent<?> event =
+                    orderEventFactory.createOrderCreatedEvent(saved.getId(), payload);
 
+            // 📨 7. Save to outbox
+            outboxService.saveEvent(
+                    saved.getId(),
+                    "ORDER",
+                    "order.created",
+                    event
+            );
 
-        outboxService.saveEvent(
-                saved.getId(),
-"ORDER",
-                "order.created",
-                event
-        );
+            return mapToResponse(saved);
 
+        } catch (DataIntegrityViolationException ex) {
+            // 🔥 CRITICAL: Handles race condition (2 parallel same requests)
 
-        return OrderResponse.builder()
-                .orderId(saved.getId())
-                .amount(saved.getTotalAmount())
-                .status(saved.getStatus()).build();
+            Order alreadyCreated = orderRepository
+                    .findByIdempotencyKey(request.getIdempotencyKey())
+                    .orElseThrow(() -> ex); // should exist
+
+            return mapToResponse(alreadyCreated);
+        }
     }
-
+    private OrderResponse mapToResponse(Order order) {
+        return OrderResponse.builder()
+                .orderId(order.getId())
+                .amount(order.getTotalAmount())
+                .status(order.getStatus())
+                .build();
+    }
     @Transactional
     public void markPaymentInitiated(UUID orderId, UUID paymentId , String razorpayOrderId) {
 
@@ -128,7 +160,7 @@ public class OrderService {
         }
 
         // ✅ Prevent invalid transition
-        if (order.getStatus() == OrderStatus.FAILED) {
+        if (order.getStatus() != OrderStatus.PENDING_PAYMENT) {
             return;
         }
 
